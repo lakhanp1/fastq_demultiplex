@@ -11,7 +11,7 @@ while(my $line = <STDIN>){
 	my ($sp, $bc) = split(/\t/, $line);
 	my $bcLen = length($sp =~s/^.*_($bc[ATGC]*)_.*/$1/r) + 1;
 
-	print "$sp\t$bc\t$bcLen\n";
+	# print "$sp\t$bc\t$bcLen\n";
 	my $i=3;
 	my %freq=();
 	
@@ -32,12 +32,12 @@ while(my $line = <STDIN>){
 	
 	my $count = 0;
 	foreach my $ad(sort{$freq{$b} <=> $freq{$a}}keys %freq){
-		print "$ad\t$freq{$ad}\n";
+		print "$bc\t$ad\t$freq{$ad}\n";
 		$count++;
 		if($count >= 10){
 			last;
 		}
 	}
 	
-	print "\n";
+	# print "\n";
 }
