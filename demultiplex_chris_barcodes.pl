@@ -8,16 +8,14 @@ use Getopt::Long;
 use Pod::Usage;
 use File::Basename;
 
-#perl demultiplex.pl --barcodes barcode.txt --1 test_R1.fastq --2 test_R2.fastq
-#zcat polyii-glu-t7-2_L001-unk_R1.fastq.gz | perl -e 'my $i=-2; my $count=0; while(<>){$i++; if($i%4==0 && /^ACAGTGCAC/){$count++;}} print $count,"\n";'
 
 
 my %options;
 $options{'suffix'} = '';
 my $isPaired = 1;
+$options{'barTrim'} = 8;
 
-
-GetOptions(\%options, 'barcodes=s', '1=s', '2=s', 'suffix=s', 'help|h') or die("Error in command line arguments\n");
+GetOptions(\%options, 'barcodes=s', 'barTrim=i', '1=s@', '2:s@', 'suffix=s', 'help|h') or die("Error in command line arguments\n");
 
 
 if($options{'help'} || $options{'h'}){
@@ -43,16 +41,57 @@ if(!$options{'2'}){
 	$isPaired = 0;
 }
 
-
-my $isGz = 0;
-if($options{1}=~m/gz$/){
-	$isGz=1;
-}
-
-#read barcode data:
+#############################################################################
+## validation
 my %barcodes = ();
 my %files = ();
 
+my @r1Files = split(/,/, join(',', @{$options{1}}));
+my @r2Files = $isPaired ? split(/,/, join(',', @{$options{2}})) : ();
+
+my $isGz = 0;
+foreach(@r1Files, @r2Files){
+	# print $_,"\n";
+	if($_!~m/gz$/){
+		die "ERROR: Only .gz files accepted. File $_ is not a gzip compressed file.\n";
+	}
+	
+	if(! -e $_){
+		die "ERROR: missing file $_\n";
+	}
+}
+
+if($isPaired && $#r1Files != $#r2Files){
+	die "Error: Number of R1 and R2 files not same\n";
+}
+
+## undetermined reads files
+$barcodes{'unknown'}->{'name'} = 'unknown'.'_'.$options{'suffix'};
+$barcodes{'unknown'}->{'R1'} = $options{'suffix'} eq '' ? 'unknown_R1.fastq.gz' : 'unknown_'.$options{'suffix'}.'_R1.fastq.gz';
+$barcodes{'unknown'}->{'R2'} = $options{'suffix'} eq '' ? 'unknown_R2.fastq.gz' : 'unknown_'.$options{'suffix'}.'_R2.fastq.gz';
+
+
+open($barcodes{'unknown'}->{'fhR1'}, "|gzip > $barcodes{'unknown'}->{'R1'}") or die "Cannot create file $barcodes{'unknown'}->{'R1'}: $!";
+$barcodes{'unknown'}->{'barLen'} = 0;				#barcode length for unknown sequences
+$barcodes{'unknown'}->{'count'} = 0;				#counter for unknown sequences
+
+#Read fastq data
+my $r1OpenCmd = join(' ', 'gzip -dc', @r1Files, '|');
+my $r2OpenCmd = join(' ', 'gzip -dc', @r2Files, '|');
+
+# print "$r1OpenCmd\n$r2OpenCmd\n";
+
+open(my $fh1, $r1OpenCmd) or die "Cannot open file/s @r1Files: $!";
+my $fh2 = undef;
+
+if($isPaired){
+	open($barcodes{'unknown'}->{'fhR2'}, "|gzip > $barcodes{'unknown'}->{'R2'}") or die "Cannot create file $barcodes{'unknown'}->{'R2'}: $!";
+	open($fh2, $r2OpenCmd) or die "Cannot open file $options{2}: $!";
+}
+
+
+#############################################################################
+#read barcode data:
 open(my $barFh, $options{'barcodes'}) or die "Cannot open file $options{'barcodes'}: $!";
 
 while(<$barFh>){
@@ -61,72 +100,75 @@ while(<$barFh>){
 		my $bar = $2;
 		
 		## for 1-12 barcodes: use 7bp, for remaining barcodes: use 8bp
-		$bar = substr(uc $bar, 0, 8);
+		$bar = substr(uc $bar, 0, $options{'barTrim'});
 		
 		#check if the same file name is used for different barcodes
 		if(exists $files{$name}){
 			print "Error: Two different barcodes are using same sample name.
 			$files{$name} : $name
 			$bar : $name\n";
+			&error_cleanup();
 			die;
 		}
 		
 		$files{$name} = $bar;
 		
-		$barcodes{$bar}->[0] = $options{'suffix'} eq '' ? $name : $name.'_'.$options{'suffix'};			#Sample name suffix
-		#$barcodes{$bar}->[0] = $name.'_'.$options{'suffix'};			#Sample name prefix
+		## check if a barcode is specified for two samples
+		if(exists $barcodes{$bar}->{'name'}){
+			print "Error: barcode clash. Two barcodes specified for same sample.
+			$bar : $barcodes{$bar}->{'name'}
+			$bar : $name\n";
+			&error_cleanup();
+			die;
+		}
 		
-		open($barcodes{$bar}->[1], "|gzip >$barcodes{$bar}->[0]_R1.fastq.gz") or die "Cannot create file $barcodes{$bar}->[0]_R1.fastq.gz: $!";			#R1 file
+
+		$barcodes{$bar}->{'name'} = $options{'suffix'} eq '' ? $name : $name.'_'.$options{'suffix'};			#Sample name suffix
+		$barcodes{$bar}->{'R1'} = $barcodes{$bar}->{'name'}.'_R1.fastq.gz';
+		$barcodes{$bar}->{'R2'} = $barcodes{$bar}->{'name'}.'_R2.fastq.gz';
+		
+		#R1 file
+		open($barcodes{$bar}->{'fhR1'}, "|-", "gzip > $barcodes{$bar}->{'R1'}") or die 'Cannot create file ',$barcodes{$bar}->{'R1'},": $!";
 		
 		if($isPaired){
-			open($barcodes{$bar}->[2], "|gzip >$barcodes{$bar}->[0]_R2.fastq.gz") or die "Cannot create file $barcodes{$bar}->[0]_R2.fastq.gz: $!";			#R2 file
+			#R2 file
+			open($barcodes{$bar}->{'fhR2'}, "|-", "gzip > $barcodes{$bar}->{'R2'}") or die "Cannot create file ",$barcodes{$bar}->{'R2'},": $!";
 		}
 		
 		#this barcode length will be used to trim the sequence and qual line
-		$barcodes{$bar}->[3] = length($bar);
-		$barcodes{$bar}->[4] = 0;			#counter for each barcode
+		$barcodes{$bar}->{'barLen'} = length($bar);
+		$barcodes{$bar}->{'count'} = 0;			#counter for each barcode
 	}
 	elsif(/^\s*$/){
 		next;
 	}
 	else{
-		print "Wrong format is barcode file at line: $_";
+		&error_cleanup();
+		print "Wrong format in barcode file at line: $_";
 		die;
 	}
 }
 
+
+#############################################################################
+## demultiplexing
 #All barcodes in regular expression
 my $pattern = join("|", keys %barcodes);
 
-$options{1}=~m/(.*)\.fastq.*/;
-my $unknownR1 = $options{'suffix'} eq '' ? 'unknown_R1.fastq.gz' : 'unknown_'.$options{'suffix'}.'_R1.fastq.gz';
-my $unknownR2 = $options{'suffix'} eq '' ? 'unknown_R2.fastq.gz' : 'unknown_'.$options{'suffix'}.'_R2.fastq.gz';
-
-
-$barcodes{'unknown'}->[0] = 'unknown'.'_'.$options{'suffix'};
-open($barcodes{'unknown'}->[1], "|gzip >$unknownR1") or die "Cannot create file $unknownR1: $!";
-$barcodes{'unknown'}->[3] = 0;				#barcode length for unknown sequences
-$barcodes{'unknown'}->[4] = 0;				#counter for unknown sequences
-
-
-
-
-#Read fastq data
-open(my $fh1, $isGz ? "gzip -dc $options{1} |" : $options{1}) or die "Cannot open file $options{1}: $!";
-my $fh2 = undef;
-
-if($isPaired){
-	open($barcodes{'unknown'}->[2], "|gzip >$unknownR2") or die "Cannot create file $unknownR2: $!";
-	open($fh2, $isGz ? "gzip -dc $options{2} |" : $options{2}) or die "Cannot open file $options{2}: $!";
-}
 
 my ($p1, $p2, $outBar);
 
 if($isPaired){
 	#for paired end data
 	while(1){
-		if(eof($fh1)){
-			last;
+		if(eof($fh1) || eof($fh2)){
+			if(eof($fh1) && eof($fh2)){
+				last;
+			}
+			else{
+				&error_cleanup();
+				die "ERROR: Number of reads in R1 and R2 files are not equal\n";
+			}
 		}
 		
 		#read line1: headers
@@ -141,17 +183,11 @@ if($isPaired){
 			my $sq2 = <$fh2>;
 			if($sq1=~m/^($pattern)/){
 				$outBar = $1;
-				#trim from 5_prime end to remove barcode
-				# $p1 .= substr($sq1, $barcodes{$outBar}->[3]);
-				# $p2 .= substr($sq2, $barcodes{$outBar}->[3]);
 				$p1 .= $sq1;
 				$p2 .= $sq2;
 			}
 			# elsif($sq2=~m/^($pattern)/){
 				# $outBar = $1;
-				# #trim from 5_prime end to remove barcode
-				# # $p1 .= substr($sq1, $barcodes{$outBar}->[3]);
-				# # $p2 .= substr($sq2, $barcodes{$outBar}->[3]);
 				# $p1 .= $sq1;
 				# $p2 .= $sq2;
 			# }
@@ -166,15 +202,12 @@ if($isPaired){
 			$p2 .= <$fh2>;
 			
 			#read line 4: qual
-			#trim the qual of 5_prime barcode
-			# $p1 .= substr(<$fh1>, $barcodes{$outBar}->[3]);
-			# $p2 .= substr(<$fh2>, $barcodes{$outBar}->[3]);
 			$p1 .= <$fh1>;
 			$p2 .= <$fh2>;
 			
-			print {$barcodes{$outBar}->[1]} $p1;
-			print {$barcodes{$outBar}->[2]} $p2;
-			$barcodes{$outBar}->[4]++;
+			print {$barcodes{$outBar}->{'fhR1'}} $p1;
+			print {$barcodes{$outBar}->{'fhR2'}} $p2;
+			$barcodes{$outBar}->{'count'}++;
 		}
 	}
 }
@@ -195,8 +228,6 @@ else{
 			my $sq1 = <$fh1>;
 			if($sq1=~m/^($pattern)/){
 				$outBar = $1;
-				#trim from 5_prime end to remove barcode
-				# $p1 .= substr($sq1, $barcodes{$outBar}->[3]);
 				$p1 .= $sq1;
 			}
 			else{
@@ -208,31 +239,55 @@ else{
 			$p1 .= <$fh1>;
 			
 			#read line 4: qual
-			#trim the qual of 5_prime barcode
-			# $p1 .= substr(<$fh1>, $barcodes{$outBar}->[3]);
 			$p1 .= <$fh1>;
 			
-			print {$barcodes{$outBar}->[1]} $p1;
-			$barcodes{$outBar}->[4]++;
+			print {$barcodes{$outBar}->{'fhR1'}} $p1;
+			$barcodes{$outBar}->{'count'}++;
 						
 		}
 	}
 }
 
-open(my $out, '>>','demultiplex.stats') or die "Cannot create file reads.stats: $!";
+open(my $out, '>','demultiplex.stats') or die "Cannot create file reads.stats: $!";
 
 
-foreach(sort{$barcodes{$a}->[0] cmp $barcodes{$b}->[0]}keys %barcodes){
-	close($barcodes{$_}->[1]);
+foreach(sort{$barcodes{$a}->{'name'} cmp $barcodes{$b}->{'name'}}keys %barcodes){
+	close($barcodes{$_}->{'fhR1'});
 	if($isPaired){
-		close($barcodes{$_}->[2]);
+		close($barcodes{$_}->{'fhR2'});
 	}
 	
-	print $out "$barcodes{$_}->[0]\t$barcodes{$_}->[4]\n";
+	print $out $barcodes{$_}->{'name'}, "\t", $barcodes{$_}->{'count'}, "\n";
 }
 
 close($out);
 close($barFh);
+
+
+
+## cleanup the files in case of any error
+sub error_cleanup{
+	foreach(keys %barcodes){
+		close($barcodes{$_}->{'fhR1'});
+		unlink($barcodes{$_}->{'R1'});
+		if($isPaired){
+			close($barcodes{$_}->{'fhR2'});
+			unlink($barcodes{$_}->{'R2'});
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 __END__
@@ -251,7 +306,7 @@ Help Options:
 
 =head1 DESCRIPTION
 
-This script is used to demultiplex the libraries generated by Chris\' multiplexing
+This script is used to demultiplex the libraries generated by Chris' multiplexing
 protocol for ChIPseq samples.
 
 
@@ -263,13 +318,17 @@ protocol for ChIPseq samples.
 
 [STR] TAB separated Barcode file where first column is sample name and second column in barcode sequence
 
+=item B<--barTrim>
+
+[INT] Trim all barcodes to this length. Default: 8
+
 =item B<--1>
 
-[STR] Forward read file
+[STR] Forward read file. COMMA separated multiple files can be provided.
 
 =item B<--2>
 
-[STR] Reverse read file (Optional)
+[STR] Reverse read file (Optional). COMMA separated multiple files can be provided.
 
 =item B<--suffix>
 
