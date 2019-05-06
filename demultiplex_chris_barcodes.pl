@@ -13,7 +13,7 @@ use File::Basename;
 my %options;
 $options{'suffix'} = '';
 my $isPaired = 1;
-$options{'barTrim'} = 8;
+$options{'barTrim'} = 7;
 
 GetOptions(\%options, 'barcodes=s', 'barTrim=i', '1=s@', '2:s@', 'suffix=s', 'help|h') or die("Error in command line arguments\n");
 
@@ -110,7 +110,7 @@ while(<$barFh>){
 		
 		## for 1-12 barcodes: use 7bp, for remaining barcodes: use 8bp
 		$bar = substr(uc $bar, 0, $barTrim);
-				
+		
 		#check if the same file name is used for different barcodes
 		if(exists $files{$name}){
 			print STDERR "Error: Two different barcodes are using same sample name.
@@ -181,42 +181,38 @@ if($isPaired){
 		$p1 = <$fh1>;
 		$p2 = <$fh2>;
 		
-		# if($p1=~m/^@\w+:\d+:[\w-]+(:\d+){4}\s\d+:(Y|N)/ && $p2=~m/^@\w+:\d+:[\w-]+(:\d+){4}\s\d+:(Y|N)/){
-			#@SIM:1:FCX:1:15:6329:1045 1:N:0:2
-			
-			#read line 2: sequence
-			my $sq1 = <$fh1>;
-			my $sq2 = <$fh2>;
-			
-			my $sq1Bar = substr($sq1, 0, $barTrim);
-			my $sq2Bar = substr($sq2, 0, $barTrim);
+		#read line 2: sequence
+		my $sq1 = <$fh1>;
+		my $sq2 = <$fh2>;
+		
+		my $sq1Bar = substr($sq1, 0, $barTrim);
+		my $sq2Bar = substr($sq2, 0, $barTrim);
 
-			if(exists($barcodes{$sq1Bar})){
-				$p1 .= $sq1;
-				$p2 .= $sq2;
-			}
-			# elsif(exists($barcodes{$sq2Bar})){
-				# $p1 .= $sq1;
-				# $p2 .= $sq2;
-			# }
-			else{
-				$sq1Bar = 'unknown';
-				$p1 .= $sq1;
-				$p2 .= $sq2;
-			}
-					
-			#read line 3: +
-			$p1 .= <$fh1>;
-			$p2 .= <$fh2>;
-			
-			#read line 4: qual
-			$p1 .= <$fh1>;
-			$p2 .= <$fh2>;
-			
-			print {$barcodes{$sq1Bar}->{'fhR1'}} $p1;
-			print {$barcodes{$sq1Bar}->{'fhR2'}} $p2;
-			$barcodes{$sq1Bar}->{'count'}++;
+		if(exists($barcodes{$sq1Bar})){
+			$p1 .= $sq1;
+			$p2 .= $sq2;
+		}
+		# elsif(exists($barcodes{$sq2Bar})){
+			# $p1 .= $sq1;
+			# $p2 .= $sq2;
 		# }
+		else{
+			$sq1Bar = 'unknown';
+			$p1 .= $sq1;
+			$p2 .= $sq2;
+		}
+				
+		#read line 3: +
+		$p1 .= <$fh1>;
+		$p2 .= <$fh2>;
+		
+		#read line 4: qual
+		$p1 .= <$fh1>;
+		$p2 .= <$fh2>;
+		
+		print {$barcodes{$sq1Bar}->{'fhR1'}} $p1;
+		print {$barcodes{$sq1Bar}->{'fhR2'}} $p2;
+		$barcodes{$sq1Bar}->{'count'}++;
 	}
 }
 else{
@@ -229,32 +225,28 @@ else{
 		#read line1: headers
 		$p1 = <$fh1>;
 		
-		# if($p1=~m/^@\w+:\d+:[\w-]+(:\d+){4}\s\d+:(Y|N)/){
-			#@SIM:1:FCX:1:15:6329:1045 1:N:0:2
-			
-			#read line 2: sequence
-			my $sq1 = <$fh1>;
+		#read line 2: sequence
+		my $sq1 = <$fh1>;
 
-			my $sq1Bar = substr($sq1, 0, $barTrim);
+		my $sq1Bar = substr($sq1, 0, $barTrim);
 
-			if(exists($barcodes{$sq1Bar})){
-				$p1 .= $sq1;
-			}
-			else{
-				$sq1Bar = 'unknown';
-				$p1 .= $sq1;
-			}
+		if(exists($barcodes{$sq1Bar})){
+			$p1 .= $sq1;
+		}
+		else{
+			$sq1Bar = 'unknown';
+			$p1 .= $sq1;
+		}
+				
+		#read line 3: +
+		$p1 .= <$fh1>;
+		
+		#read line 4: qual
+		$p1 .= <$fh1>;
+		
+		print {$barcodes{$sq1Bar}->{'fhR1'}} $p1;
+		$barcodes{$sq1Bar}->{'count'}++;
 					
-			#read line 3: +
-			$p1 .= <$fh1>;
-			
-			#read line 4: qual
-			$p1 .= <$fh1>;
-			
-			print {$barcodes{$sq1Bar}->{'fhR1'}} $p1;
-			$barcodes{$sq1Bar}->{'count'}++;
-						
-		# }
 	}
 }
 
