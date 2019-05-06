@@ -13,7 +13,7 @@ use File::Basename;
 my %options;
 $options{'suffix'} = '';
 my $isPaired = 1;
-$options{'barTrim'} = 8;
+$options{'barTrim'} = 7;
 
 GetOptions(\%options, 'barcodes=s', 'barTrim=i', '1=s@', '2:s@', 'suffix=s', 'help|h') or die("Error in command line arguments\n");
 
@@ -45,9 +45,12 @@ if(!$options{'2'}){
 ## validation
 my %barcodes = ();
 my %files = ();
+my $barTrim = $options{'barTrim'};
 
 my @r1Files = split(/,/, join(',', @{$options{1}}));
 my @r2Files = $isPaired ? split(/,/, join(',', @{$options{2}})) : ();
+
+print STDERR "R1 files: @r1Files\nR2files: @r2Files\n";
 
 my $isGz = 0;
 foreach(@r1Files, @r2Files){
@@ -99,12 +102,18 @@ while(<$barFh>){
 		my $name = $1;
 		my $bar = $2;
 		
+		# print length($bar),"\t$barTrim\n";		
+		if(length($bar) < $barTrim){
+			print STDERR "Error: barcode length less than suggested barTrim option for barcode: ", $bar, "\n";			
+			die;
+		}
+		
 		## for 1-12 barcodes: use 7bp, for remaining barcodes: use 8bp
-		$bar = substr(uc $bar, 0, $options{'barTrim'});
+		$bar = substr(uc $bar, 0, $barTrim);
 		
 		#check if the same file name is used for different barcodes
 		if(exists $files{$name}){
-			print "Error: Two different barcodes are using same sample name.
+			print STDERR "Error: Two different barcodes are using same sample name.
 			$files{$name} : $name
 			$bar : $name\n";
 			&error_cleanup();
@@ -115,7 +124,7 @@ while(<$barFh>){
 		
 		## check if a barcode is specified for two samples
 		if(exists $barcodes{$bar}->{'name'}){
-			print "Error: barcode clash. Two barcodes specified for same sample.
+			print STDERR "Error: barcode clash. Two barcodes specified for same sample.
 			$bar : $barcodes{$bar}->{'name'}
 			$bar : $name\n";
 			&error_cleanup();
@@ -144,7 +153,7 @@ while(<$barFh>){
 	}
 	else{
 		&error_cleanup();
-		print "Wrong format in barcode file at line: $_";
+		print STDERR "Wrong format in barcode file at line: $_";
 		die;
 	}
 }
@@ -152,9 +161,6 @@ while(<$barFh>){
 
 #############################################################################
 ## demultiplexing
-#All barcodes in regular expression
-my $pattern = join("|", keys %barcodes);
-
 
 my ($p1, $p2, $outBar);
 
@@ -175,40 +181,38 @@ if($isPaired){
 		$p1 = <$fh1>;
 		$p2 = <$fh2>;
 		
-		if($p1=~m/^@\w+:\d+:[\w-]+(:\d+){4}\s\d+:(Y|N)/ && $p2=~m/^@\w+:\d+:[\w-]+(:\d+){4}\s\d+:(Y|N)/){
-			#@SIM:1:FCX:1:15:6329:1045 1:N:0:2
-			
-			#read line 2: sequence
-			my $sq1 = <$fh1>;
-			my $sq2 = <$fh2>;
-			if($sq1=~m/^($pattern)/){
-				$outBar = $1;
-				$p1 .= $sq1;
-				$p2 .= $sq2;
-			}
-			# elsif($sq2=~m/^($pattern)/){
-				# $outBar = $1;
-				# $p1 .= $sq1;
-				# $p2 .= $sq2;
-			# }
-			else{
-				$outBar = 'unknown';
-				$p1 .= $sq1;
-				$p2 .= $sq2;
-			}
-					
-			#read line 3: +
-			$p1 .= <$fh1>;
-			$p2 .= <$fh2>;
-			
-			#read line 4: qual
-			$p1 .= <$fh1>;
-			$p2 .= <$fh2>;
-			
-			print {$barcodes{$outBar}->{'fhR1'}} $p1;
-			print {$barcodes{$outBar}->{'fhR2'}} $p2;
-			$barcodes{$outBar}->{'count'}++;
+		#read line 2: sequence
+		my $sq1 = <$fh1>;
+		my $sq2 = <$fh2>;
+		
+		my $sq1Bar = substr($sq1, 0, $barTrim);
+		my $sq2Bar = substr($sq2, 0, $barTrim);
+
+		if(exists($barcodes{$sq1Bar})){
+			$p1 .= $sq1;
+			$p2 .= $sq2;
 		}
+		# elsif(exists($barcodes{$sq2Bar})){
+			# $p1 .= $sq1;
+			# $p2 .= $sq2;
+		# }
+		else{
+			$sq1Bar = 'unknown';
+			$p1 .= $sq1;
+			$p2 .= $sq2;
+		}
+				
+		#read line 3: +
+		$p1 .= <$fh1>;
+		$p2 .= <$fh2>;
+		
+		#read line 4: qual
+		$p1 .= <$fh1>;
+		$p2 .= <$fh2>;
+		
+		print {$barcodes{$sq1Bar}->{'fhR1'}} $p1;
+		print {$barcodes{$sq1Bar}->{'fhR2'}} $p2;
+		$barcodes{$sq1Bar}->{'count'}++;
 	}
 }
 else{
@@ -221,30 +225,28 @@ else{
 		#read line1: headers
 		$p1 = <$fh1>;
 		
-		if($p1=~m/^@\w+:\d+:[\w-]+(:\d+){4}\s\d+:(Y|N)/){
-			#@SIM:1:FCX:1:15:6329:1045 1:N:0:2
-			
-			#read line 2: sequence
-			my $sq1 = <$fh1>;
-			if($sq1=~m/^($pattern)/){
-				$outBar = $1;
-				$p1 .= $sq1;
-			}
-			else{
-				$outBar = 'unknown';
-				$p1 .= $sq1;
-			}
-					
-			#read line 3: +
-			$p1 .= <$fh1>;
-			
-			#read line 4: qual
-			$p1 .= <$fh1>;
-			
-			print {$barcodes{$outBar}->{'fhR1'}} $p1;
-			$barcodes{$outBar}->{'count'}++;
-						
+		#read line 2: sequence
+		my $sq1 = <$fh1>;
+
+		my $sq1Bar = substr($sq1, 0, $barTrim);
+
+		if(exists($barcodes{$sq1Bar})){
+			$p1 .= $sq1;
 		}
+		else{
+			$sq1Bar = 'unknown';
+			$p1 .= $sq1;
+		}
+				
+		#read line 3: +
+		$p1 .= <$fh1>;
+		
+		#read line 4: qual
+		$p1 .= <$fh1>;
+		
+		print {$barcodes{$sq1Bar}->{'fhR1'}} $p1;
+		$barcodes{$sq1Bar}->{'count'}++;
+					
 	}
 }
 
@@ -298,7 +300,7 @@ __END__
 
 =head1 SYNOPSIS
 
-perl demultiplex_chris_barcodes.pl --barcodes <Barcode file> -1 <Mate1> -2 <Mate2> --suffix <suffix to add>
+perl demultiplex_chris_barcodes.pl --barcodes <Barcode file> --1 <Mate1> --2 <Mate2> --suffix <suffix to add>
 
 Help Options:
 
