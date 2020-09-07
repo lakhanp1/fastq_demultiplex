@@ -1,4 +1,4 @@
-#!/usr/bin/env bash 
+#!/usr/bin/env perl 
 
 use strict;
 use warnings;
@@ -14,51 +14,53 @@ list 1, the mismatches for each index in list2 are counted and
 represented as matrix.
 
 USAGE:
-perl index_clash_test.pl --l1 <index_list1.tab> --l2 <index_list2.tab>
+perl index_clash_test.pl --ind1 <index_list1.tab> --ind2 <index_list2.tab>
 ';
 
-GetOptions(\%options, 'l1=s', 'l2=s', 'help|h') or die("Error in command line arguments\n");
+GetOptions(\%options, 'ind1=s', 'ind2=s', 'help|h') or die("Error in command line arguments\n");
 
-if(!$options{'l1'}){
+if(!$options{'ind1'}){
 	print STDERR "Error: Please provide the index 1 file\n";
 	die $usage;
 }
 
 
-if(!$options{'l2'}){
+if(!$options{'ind2'}){
 	print STDERR "Error: Please provide the index 2 file\n";
 	die $usage;
 }
 
 
 my %ind1 = ();
+my @ind1Ids = ();
 
-open(my $fh1, $options{'l1'}) or die "Cannot open index file ",$options{'l1'},"\n";
+open(my $fh1, $options{'ind1'}) or die "Cannot open index file ",$options{'ind1'},"\n";
 
 while(<$fh1>){
 	chomp;
 	my @tmp = split(/\t/, $_);
 	$ind1{$tmp[0]} = $tmp[1];
+	push(@ind1Ids, $tmp[0]);
 }
 
 close($fh1);
 
 
-
 ##
-print "sampleId\t",join("\t", sort keys %ind1),"\n";
+print "sampleId\t.\t",join("\t", @ind1Ids),"\n";
+print ".\tindex\t",join("\t", @ind1{@ind1Ids}),"\n";
 
-open(my $fh2, $options{'l2'}) or die "Cannot open index file ",$options{'l2'},"\n";
+open(my $fh2, $options{'ind2'}) or die "Cannot open index file ",$options{'ind2'},"\n";
 
 while(<$fh2>){
 	chomp;
 	my @tmp = split(/\t/, $_);
 	
 	my @indexMismatches = ();
-	push(@indexMismatches, $tmp[0]);
+	push(@indexMismatches, @tmp);
 	
 	## find the mismatch between the each index sequence of list1 with current index sequence
-	foreach my $i1(sort keys %ind1){
+	foreach my $i1(@ind1Ids){
 		my $mismatch = index_match($ind1{$i1}, $tmp[1]);
 		push(@indexMismatches, $mismatch);
 	}
